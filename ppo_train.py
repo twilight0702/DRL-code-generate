@@ -90,6 +90,7 @@ def collect_trajectory(
     tokenizer: Tokenizer,
     device: torch.device,
     max_seq_len: int,
+    allowed_ids: set[int],
 ):
     obs, info = env.reset()
     done = False
@@ -105,10 +106,45 @@ def collect_trajectory(
     while not (done or truncated):
         ids = encode_obs(tokenizer, obs, max_seq_len=max_seq_len).to(device)
         logits, values = model(ids)
-        logits_last = logits[0, -1]
+        logits_last = mask_logits(logits[0, -1], allowed_ids)
         value_last = values[0, -1]
         dist = Categorical(logits=logits_last)
         action = dist.sample()
+        logprob = dist.log_prob(action)
+
+        obs, reward, done, truncated, info = env.step(action.item())
+
+        trajectory["states"].append(ids.squeeze(0).cpu().tolist())
+        trajectory["actions"].append(action)
+        trajectory["logprobs"].append(logprob)
+        trajectory["values"].append(value_last)
+        trajectory["rewards"].append(torch.tensor([reward], device=device))
+        mask = 0.0 if (done or truncated) else 1.0
+        trajectory["masks"].append(torch.tensor([mask], device=device))
+    return trajectory, info
+
+
+def collect_teacher_trajectory(
+    env: CodeGenEnv,
+    model: ActorCritic,
+    tokenizer: Tokenizer,
+    device: torch.device,
+    max_seq_len: int,
+    allowed_ids: set[int],
+):
+    """
+    用当前模型贪心生成一条“教师”轨迹，提供正奖励样本，避免全 0 信号。
+    """
+    obs, info = env.reset()
+    done = truncated = False
+    trajectory = {"states": [], "actions": [], "logprobs": [], "values": [], "rewards": [], "masks": []}
+    while not (done or truncated):
+        ids = encode_obs(tokenizer, obs, max_seq_len=max_seq_len).to(device)
+        logits, values = model(ids)
+        logits_last = mask_logits(logits[0, -1], allowed_ids)
+        value_last = values[0, -1]
+        action = torch.argmax(logits_last)
+        dist = Categorical(logits=logits_last)
         logprob = dist.log_prob(action)
 
         obs, reward, done, truncated, info = env.step(action.item())
@@ -133,6 +169,15 @@ def compute_gae(rewards, values, masks, gamma: float, lam: float):
         gae = delta + gamma * lam * masks[step] * gae
         returns.insert(0, gae + values[step])
     return returns
+
+
+def mask_logits(logits: torch.Tensor, allowed_ids: set[int]) -> torch.Tensor:
+    if len(allowed_ids) == 0:
+        return logits
+    mask = torch.full_like(logits, -1e9)
+    idx = torch.tensor(list(allowed_ids), dtype=torch.long, device=logits.device)
+    mask[idx] = 0.0
+    return logits + mask
 
 
 def ppo_update(
@@ -199,6 +244,14 @@ def train_ppo(args):
     tokenizer = Tokenizer(env.vocab, env.eos_token)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # 构建受限动作集：仅允许任务 prompt 和参考解中出现过的字符
+    char_set = set()
+    for t in TASKS:
+        char_set.update(t.prompt)
+        char_set.update(t.canonical_solution)
+    allowed_ids = {tokenizer.token_to_id[ch] for ch in char_set if ch in tokenizer.token_to_id}
+    allowed_ids.add(tokenizer.token_to_id[env.eos_token])
+
     if args.load_pretrain and Path(args.load_pretrain).exists():
         model = build_model_from_pretrain(Path(args.load_pretrain), vocab_size=len(env.vocab))
     else:
@@ -211,7 +264,25 @@ def train_ppo(args):
         infos = []
         for _ in range(args.episodes_per_update):
             traj, info = collect_trajectory(
-                env, model, tokenizer, device=device, max_seq_len=args.max_seq_len
+                env,
+                model,
+                tokenizer,
+                device=device,
+                max_seq_len=args.max_seq_len,
+                allowed_ids=allowed_ids,
+            )
+            trajectories.append(traj)
+            infos.append(info)
+
+        # 教师轨迹（贪心）用于提供正奖励样本
+        for _ in range(args.teacher_episodes):
+            traj, info = collect_teacher_trajectory(
+                env,
+                model,
+                tokenizer,
+                device=device,
+                max_seq_len=args.max_seq_len,
+                allowed_ids=allowed_ids,
             )
             trajectories.append(traj)
             infos.append(info)
@@ -290,6 +361,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--updates", type=int, default=50)
     parser.add_argument("--episodes-per-update", type=int, default=8)
+    parser.add_argument("--teacher-episodes", type=int, default=2, help="每轮额外的贪心教师轨迹数量")
     parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument("--max-seq-len", type=int, default=256)
     parser.add_argument("--gamma", type=float, default=0.99)
