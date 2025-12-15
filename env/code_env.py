@@ -1,3 +1,4 @@
+import re
 import string
 import subprocess
 import sys
@@ -94,7 +95,13 @@ class CodeGenEnv(gym.Env):
         print("Code:\n", self._code_buffer)
 
     def _evaluate_code(self, code_str: str, task: Task) -> Tuple[float, bool]:
-        """写入临时代码并运行 task.test_code，返回 (reward, passed)。"""
+        """写入临时代码并运行 task.test_code，返回 (reward, passed)。
+
+        奖励设计：
+        - 基础奖励：pytest 通过比例（通过用例数/总用例数）。
+        - 语法奖励：代码可被 py_compile 通过则加 0.1 奖励。
+        总奖励截断到 1.0。
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             (tmp_path / "solution.py").write_text(code_str, encoding="utf-8")
@@ -108,6 +115,36 @@ class CodeGenEnv(gym.Env):
                 timeout=5,
                 text=True,
             )
-            passed = result.returncode == 0
-            reward = 1.0 if passed else 0.0
+            stdout = (result.stdout or "") + (result.stderr or "")
+            passed_count = 0
+            failed_count = 0
+            # 解析 pytest 输出，获取通过/失败数量用于奖励 shaping
+            m_passed = re.search(r"(\d+)\s+passed", stdout)
+            if m_passed:
+                passed_count = int(m_passed.group(1))
+            m_failed = re.search(r"(\d+)\s+failed", stdout)
+            if m_failed:
+                failed_count = int(m_failed.group(1))
+            total = passed_count + failed_count
+            if total > 0:
+                reward = passed_count / total
+                passed = passed_count == total
+            else:
+                passed = result.returncode == 0
+                reward = 1.0 if passed else 0.0
+
+            # 语法奖励：如果能 py_compile 则额外给小额奖励
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "py_compile", str(tmp_path / "solution.py")],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2,
+                    check=True,
+                )
+                reward += 0.1
+            except subprocess.SubprocessError:
+                pass
+
+            reward = min(1.0, reward)
             return reward, passed
