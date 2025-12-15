@@ -80,7 +80,8 @@ def build_model_from_pretrain(ckpt_path: Path, vocab_size: int):
 
 def encode_obs(tokenizer: Tokenizer, obs: dict, max_seq_len: int) -> torch.Tensor:
     seq = f"{obs['prompt']}\n{obs['code']}"
-    ids = tokenizer.encode(seq, add_eos=True, max_len=max_seq_len)
+    # 当前状态用于预测下一个 token，不需要额外的 EOS，否则模型会在 EOS 上预测下一步而偏向提前结束
+    ids = tokenizer.encode(seq, add_eos=False, max_len=max_seq_len)
     return torch.tensor([ids], dtype=torch.long)
 
 
@@ -91,6 +92,7 @@ def collect_trajectory(
     device: torch.device,
     max_seq_len: int,
     allowed_ids: set[int],
+    greedy: bool = False,
 ):
     obs, info = env.reset()
     done = False
@@ -109,43 +111,12 @@ def collect_trajectory(
         logits_last = mask_logits(logits[0, -1], allowed_ids)
         value_last = values[0, -1]
         dist = Categorical(logits=logits_last)
-        action = dist.sample()
-        logprob = dist.log_prob(action)
-
-        obs, reward, done, truncated, info = env.step(action.item())
-
-        trajectory["states"].append(ids.squeeze(0).cpu().tolist())
-        trajectory["actions"].append(action)
-        trajectory["logprobs"].append(logprob)
-        trajectory["values"].append(value_last)
-        trajectory["rewards"].append(torch.tensor([reward], device=device))
-        mask = 0.0 if (done or truncated) else 1.0
-        trajectory["masks"].append(torch.tensor([mask], device=device))
-    return trajectory, info
-
-
-def collect_teacher_trajectory(
-    env: CodeGenEnv,
-    model: ActorCritic,
-    tokenizer: Tokenizer,
-    device: torch.device,
-    max_seq_len: int,
-    allowed_ids: set[int],
-):
-    """
-    用当前模型贪心生成一条“教师”轨迹，提供正奖励样本，避免全 0 信号。
-    """
-    obs, info = env.reset()
-    done = truncated = False
-    trajectory = {"states": [], "actions": [], "logprobs": [], "values": [], "rewards": [], "masks": []}
-    while not (done or truncated):
-        ids = encode_obs(tokenizer, obs, max_seq_len=max_seq_len).to(device)
-        logits, values = model(ids)
-        logits_last = mask_logits(logits[0, -1], allowed_ids)
-        value_last = values[0, -1]
-        action = torch.argmax(logits_last)
-        dist = Categorical(logits=logits_last)
-        logprob = dist.log_prob(action)
+        if greedy:
+            action = torch.argmax(logits_last)
+            logprob = dist.log_prob(action)
+        else:
+            action = dist.sample()
+            logprob = dist.log_prob(action)
 
         obs, reward, done, truncated, info = env.step(action.item())
 
@@ -186,6 +157,7 @@ def ppo_update(
     batch_logprobs,
     batch_actions,
     batch_states,
+    batch_state_lens,
     batch_returns,
     batch_advantages,
     clip_coef: float,
@@ -194,6 +166,9 @@ def ppo_update(
     epochs: int,
     minibatch_size: int,
     device: torch.device,
+    bc_inputs: torch.Tensor | None = None,
+    bc_targets: torch.Tensor | None = None,
+    bc_coef: float = 0.0,
 ):
     total_steps = batch_states.size(0)
     for _ in range(epochs):
@@ -202,14 +177,17 @@ def ppo_update(
             end = start + minibatch_size
             mb_idx = indices[start:end]
             states = batch_states[mb_idx].to(device)
+            state_lens = batch_state_lens[mb_idx].to(device)
             actions = batch_actions[mb_idx].to(device)
             old_logprobs = batch_logprobs[mb_idx].to(device)
             returns = batch_returns[mb_idx].to(device)
             advantages = batch_advantages[mb_idx].to(device)
 
             logits, values = model(states)
-            logits_last = logits[:, -1, :]
-            values_last = values[:, -1, 0]
+            batch_indices = torch.arange(states.size(0), device=device)
+            last_token_idx = state_lens.to(device) - 1  # gather logits at each sequence's true end
+            logits_last = logits[batch_indices, last_token_idx, :]
+            values_last = values[batch_indices, last_token_idx, 0]
 
             dist = Categorical(logits=logits_last)
             logprobs = dist.log_prob(actions)
@@ -224,19 +202,52 @@ def ppo_update(
 
             loss = policy_loss + value_coef * value_loss - entropy_coef * entropy
 
+            # 可选的行为克隆项：用教师数据的下一 token 监督指导策略
+            if bc_inputs is not None and bc_targets is not None and bc_coef > 0:
+                logits_bc, _ = model(bc_inputs.to(device))
+                bc_loss = nn.CrossEntropyLoss(ignore_index=-100)(
+                    logits_bc.view(-1, logits_bc.size(-1)), bc_targets.to(device).view(-1)
+                )
+                loss = loss + bc_coef * bc_loss
+
             optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
 
-def flatten_sequences(seqs: List[List[int]], pad_id: int):
-    max_len = max(len(s) for s in seqs)
+def flatten_sequences(seqs: List[List[int]], pad_id: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Pad variable-length sequences and return their true lengths."""
+    lengths = torch.tensor([len(s) for s in seqs], dtype=torch.long)
+    max_len = int(lengths.max().item())
     padded = []
     for s in seqs:
         pad_len = max_len - len(s)
         padded.append(s + [pad_id] * pad_len)
-    return torch.tensor(padded, dtype=torch.long)
+    return torch.tensor(padded, dtype=torch.long), lengths
+
+
+def build_teacher_batch(tokenizer: Tokenizer, max_seq_len: int, pad_id: int):
+    """
+    使用任务的 prompt+canonical_solution 构建一个 teacher forcing 批次，提供监督信号。
+    """
+    inputs = []
+    targets = []
+    for task in TASKS:
+        seq = f"{task.prompt}\n{task.canonical_solution}"
+        token_ids = tokenizer.encode(seq, add_eos=True, max_len=max_seq_len)
+        inp = token_ids[:-1]
+        tgt = token_ids[1:]
+        inputs.append(inp)
+        targets.append(tgt)
+    max_len = max(len(x) for x in inputs)
+    padded_inp = []
+    padded_tgt = []
+    for inp, tgt in zip(inputs, targets):
+        pad_len = max_len - len(inp)
+        padded_inp.append(inp + [pad_id] * pad_len)
+        padded_tgt.append(tgt + [-100] * pad_len)  # -100 供 CE ignore
+    return torch.tensor(padded_inp, dtype=torch.long), torch.tensor(padded_tgt, dtype=torch.long)
 
 
 def train_ppo(args):
@@ -270,19 +281,21 @@ def train_ppo(args):
                 device=device,
                 max_seq_len=args.max_seq_len,
                 allowed_ids=allowed_ids,
+                greedy=False,
             )
             trajectories.append(traj)
             infos.append(info)
 
         # 教师轨迹（贪心）用于提供正奖励样本
         for _ in range(args.teacher_episodes):
-            traj, info = collect_teacher_trajectory(
+            traj, info = collect_trajectory(
                 env,
                 model,
                 tokenizer,
                 device=device,
                 max_seq_len=args.max_seq_len,
                 allowed_ids=allowed_ids,
+                greedy=True,
             )
             trajectories.append(traj)
             infos.append(info)
@@ -311,10 +324,15 @@ def train_ppo(args):
         logprobs = torch.stack(logprobs).detach()
         actions = torch.stack(actions).detach()
         pad_id = tokenizer.token_to_id[tokenizer.eos_token]
-        states = flatten_sequences(states, pad_id=pad_id)
+        states, state_lens = flatten_sequences(states, pad_id=pad_id)
 
         # 归一化优势
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        # 构建 teacher forcing 批次
+        bc_inputs, bc_targets = build_teacher_batch(
+            tokenizer, max_seq_len=args.max_seq_len, pad_id=pad_id
+        )
 
         ppo_update(
             model,
@@ -322,6 +340,7 @@ def train_ppo(args):
             batch_logprobs=logprobs,
             batch_actions=actions,
             batch_states=states,
+            batch_state_lens=state_lens,
             batch_returns=returns,
             batch_advantages=advantages,
             clip_coef=args.clip,
@@ -330,6 +349,9 @@ def train_ppo(args):
             epochs=args.ppo_epochs,
             minibatch_size=args.minibatch_size,
             device=device,
+            bc_inputs=bc_inputs.to(device),
+            bc_targets=bc_targets.to(device),
+            bc_coef=args.bc_coef,
         )
 
         # 简单日志：平均 episodic reward
@@ -360,10 +382,10 @@ def train_ppo(args):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--updates", type=int, default=50)
-    parser.add_argument("--episodes-per-update", type=int, default=8)
-    parser.add_argument("--teacher-episodes", type=int, default=2, help="每轮额外的贪心教师轨迹数量")
-    parser.add_argument("--max-steps", type=int, default=200)
-    parser.add_argument("--max-seq-len", type=int, default=256)
+    parser.add_argument("--episodes-per-update", type=int, default=16)
+    parser.add_argument("--teacher-episodes", type=int, default=8, help="每轮额外的贪心教师轨迹数量")
+    parser.add_argument("--max-steps", type=int, default=150)
+    parser.add_argument("--max-seq-len", type=int, default=150)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--lam", type=float, default=0.95)
     parser.add_argument("--clip", type=float, default=0.2)
@@ -376,6 +398,7 @@ def parse_args():
     parser.add_argument("--minibatch-size", type=int, default=32)
     parser.add_argument("--load-pretrain", type=str, default="checkpoints/pretrain.pt")
     parser.add_argument("--save-path", type=str, default="checkpoints/ppo.pt")
+    parser.add_argument("--bc-coef", type=float, default=0.5, help="行为克隆损失系数")
     return parser.parse_args()
 
 

@@ -133,18 +133,19 @@ class CodeGenEnv(gym.Env):
                 passed = result.returncode == 0
                 reward = 1.0 if passed else 0.0
 
-            # 语法奖励：如果能 py_compile 则额外给小额奖励
-            try:
-                subprocess.run(
-                    [sys.executable, "-m", "py_compile", str(tmp_path / "solution.py")],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=2,
-                    check=True,
-                )
-                reward += 0.1
-            except subprocess.SubprocessError:
-                pass
+            # 语法奖励：如果能 py_compile 且代码非空，则额外给小额奖励
+            if code_str.strip():
+                try:
+                    subprocess.run(
+                        [sys.executable, "-m", "py_compile", str(tmp_path / "solution.py")],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=2,
+                        check=True,
+                    )
+                    reward += 0.1
+                except subprocess.SubprocessError:
+                    pass
 
             reward = min(1.0, reward)
             return reward, passed
