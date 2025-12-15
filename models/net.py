@@ -17,9 +17,9 @@ class CharPolicy(nn.Module):
     def forward(self, input_ids: torch.Tensor):
         # input_ids: (batch, seq_len)
         x = self.embed(input_ids)
-        h, _ = self.gru(x)
+        h, hidden = self.gru(x)
         logits = self.head(h)
-        return logits
+        return logits, hidden
 
     def step(self, input_ids: torch.Tensor, hidden=None):
         """

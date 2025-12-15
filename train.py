@@ -54,8 +54,11 @@ class TaskDataset(Dataset):
         self.samples = []
         self.pad_id = tokenizer.token_to_id[tokenizer.eos_token] if eos_as_pad else 0
         for task in tasks:
-            code_ids = tokenizer.encode(task.canonical_solution, add_eos=True)
-            self.samples.append((code_ids[:-1], code_ids[1:]))  # 输入/目标
+            # 将 prompt 作为条件前缀，帮助模型区分任务
+            seq = f"{task.prompt}\n{task.canonical_solution}"
+            token_ids = tokenizer.encode(seq, add_eos=True)
+            # 输入/目标，长度相同
+            self.samples.append((token_ids[:-1], token_ids[1:]))
 
     def __len__(self):
         return len(self.samples)
@@ -151,7 +154,7 @@ def pretrain_teacher_forcing(
         for inputs, targets in loader:
             inputs = inputs.to(device)
             targets = targets.to(device)
-            logits = model(inputs)
+            logits, _ = model(inputs)
             loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
             optimizer.zero_grad()
             loss.backward()
@@ -168,6 +171,8 @@ def pretrain_teacher_forcing(
                 "state_dict": model.state_dict(),
                 "vocab": env.vocab,
                 "eos_token": env.eos_token,
+                "embed_dim": embed_dim,
+                "hidden_dim": hidden_dim,
             },
             save_path,
         )
@@ -175,14 +180,29 @@ def pretrain_teacher_forcing(
     return model
 
 
-def greedy_decode(model: CharPolicy, tokenizer: Tokenizer, max_len: int = 256) -> str:
+def greedy_decode(
+    model: CharPolicy, tokenizer: Tokenizer, prefix: str = "", max_len: int = 256
+) -> str:
+    """
+    带任务前缀的贪心解码：先喂入 prefix，继续自回归生成直到 <EOS> 或长度上限。
+    """
     model.eval()
     device = next(model.parameters()).device
-    # 以 pad/eos 作为起始 token，逐步生成
-    pad_id = tokenizer.token_to_id[tokenizer.eos_token]
-    input_id = torch.tensor([[pad_id]], dtype=torch.long, device=device)
     generated = []
     hidden = None
+
+    # 先跑一遍前缀，设置 hidden state
+    if prefix:
+        prefix_ids = tokenizer.encode(prefix, add_eos=False)
+        for tid in prefix_ids:
+            input_id = torch.tensor([[tid]], dtype=torch.long, device=device)
+            _, hidden = model.step(input_id, hidden)
+        last_id = prefix_ids[-1]
+    else:
+        last_id = tokenizer.token_to_id[tokenizer.eos_token]
+
+    input_id = torch.tensor([[last_id]], dtype=torch.long, device=device)
+
     with torch.no_grad():
         for _ in range(max_len):
             logits, hidden = model.step(input_id, hidden)
@@ -202,9 +222,18 @@ def evaluate_checkpoint(
     ckpt = torch.load(ckpt_path, map_location="cpu")
     vocab = ckpt["vocab"]
     eos_token = ckpt["eos_token"]
+    # 兼容老的 checkpoint：如无 embed/hidden 维度记录则从参数形状推断
+    if "embed_dim" in ckpt and "hidden_dim" in ckpt:
+        embed_dim = ckpt["embed_dim"]
+        hidden_dim = ckpt["hidden_dim"]
+    else:
+        state = ckpt["state_dict"]
+        embed_dim = state["embed.weight"].shape[1]
+        hidden_dim = state["gru.weight_hh_l0"].shape[0] // 3
+        print(f"[eval] inferred embed_dim={embed_dim}, hidden_dim={hidden_dim} from checkpoint")
     tokenizer = Tokenizer(vocab=vocab, eos_token=eos_token)
 
-    model = CharPolicy(len(vocab))
+    model = CharPolicy(len(vocab), embed_dim=embed_dim, hidden_dim=hidden_dim)
     model.load_state_dict(ckpt["state_dict"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -212,7 +241,8 @@ def evaluate_checkpoint(
     env = CodeGenEnv(max_steps=max_steps)
     successes = 0
     for task in TASKS:
-        code = greedy_decode(model, tokenizer, max_len=max_len)
+        prefix = f"{task.prompt}\n"
+        code = greedy_decode(model, tokenizer, prefix=prefix, max_len=max_len)
         reward, passed = env._evaluate_code(code, task)
         successes += int(passed)
         print(f"[eval] task={task.name} passed={passed} reward={reward} code_len={len(code)}")

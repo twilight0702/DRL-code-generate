@@ -27,9 +27,13 @@ class CodeGenEnv(gym.Env):
         self.tasks = tasks or TASKS
         self.max_steps = max_steps
 
-        # 限制字符表，降低搜索空间；最后一个 token 为 <EOS>
+        # 限制字符表，降低搜索空间；最后一个 token 为 <EOS>。
+        # 同时包含任务 prompt 中的字符（有中文），保证编码不报错。
         base_chars = string.ascii_letters + string.digits + " _():.,\n+-*/=<>'\"[]{}#"
-        self.vocab = list(dict.fromkeys(base_chars))  # 去重并保序
+        extra_chars = set()
+        for t in self.tasks:
+            extra_chars.update(t.prompt)
+        self.vocab = list(dict.fromkeys(base_chars + "".join(sorted(extra_chars))))  # 去重保序
         self.eos_token = "<EOS>"
         self.vocab.append(self.eos_token)
 
