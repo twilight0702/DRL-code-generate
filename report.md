@@ -319,64 +319,6 @@ Saved PPO checkpoint to checkpoints/ppo.pt
 [update 35] avg_reward=0.017 last_info=factorial passed=False
 ```
 
-
-
-
-## 当前代码运行指令
-
-### 安装与基础验证
-```bash
-# 建议使用 venv/conda 后
-pip install -r requirements.txt
-pytest tests/test_tasks.py
-```
-
-### 基线与预热
-```bash
-# 随机/模板基线
-python train.py --mode random --episodes 3
-python train.py --mode template --episodes 3
-
-# 预热（teacher forcing）
-python train.py --mode pretrain --epochs 60 --hidden-dim 512 --save-path checkpoints/pretrain.pt
-# 评估预热
-python train.py --mode eval --load-path checkpoints/pretrain.pt --max-gen-len 200
-```
-
-### PPO 训练与评估（独立脚本）
-```bash
-# 训练（可调超参）
-python ppo_train.py \
-  --updates 50 \
-  --episodes-per-update 16 \
-  --teacher-episodes 8 \
-  --max-steps 150 \
-  --max-seq-len 150 \
-  --load-pretrain checkpoints/pretrain.pt \
-  --save-path checkpoints/ppo.pt \
-  --entropy-coef 0.1 \
-  --lr 3e-4 \
-  --bc-coef 0.5
-
-# 评估任意 checkpoint（预热或 PPO）
-python benchmark.py --mode model --ckpt checkpoints/ppo.pt --max-gen-len 150
-python benchmark.py --mode model --ckpt checkpoints/pretrain.pt --max-gen-len 200
-# 基线评估
-python benchmark.py --mode random --episodes 5
-python benchmark.py --mode template --episodes 5
-```
-
-## 关键文件概览
-- `PLAN.md`：总体计划。
-- `requirements.txt`：依赖。
-- `tasks/tasks.py`：任务定义（prompt/参考解/测试）。
-- `env/code_env.py`：代码生成环境，奖励包含通过比例+语法奖励（非空代码）。
-- `models/net.py`：CharPolicy（嵌入+GRU+线性头）。
-- `train.py`：随机/模板/预热/评估（贪心）。
-- `ppo_train.py`：PPO 训练（加载预热、动作掩码、教师轨迹、行为克隆）。
-- `benchmark.py`：随机/模板/任意 checkpoint 评测。
-- `tests/test_tasks.py`：验证参考解。
-
 ## 现状与下一步建议
 - 现状：预热贪心 2/5 成功；PPO 在多次尝试后仍未显著提升，奖励仅来自语法/极少部分通过。
 - 下一步可尝试：
@@ -483,3 +425,16 @@ Saved PPO checkpoint to checkpoints/ppo.pt
 [model] task=count_vowels passed=False reward=0.0 code_len=103
 [model] success=2/5 = 0.40
 ```
+
+
+2026.1.5
+
+### 6. 近期调参与实验记录（本次对话概览）
+- 任务与脚本：任务扩展到 13；支持 train/val 划分，`--no-split` 为全量训练评估。新增一键脚本 `run_all.sh`（标准）、`run_all_fast.sh`（极简）、`run_all_medium.sh`（可调参），日志统一写到 `results/` 单一 txt。
+- 预热调参：hidden_dim 提升到 512，epochs 提升到 80，长度上限收紧到 120/150；无划分时预热成功率提升到约 4–5/13（见 results/run_medium_local_*）。
+- PPO 调参（本地无划分）：逐步提高教师信号（teacher-episodes 4→6→8，bc-coef 1.0→2.0→3.0），扩大更新步数（20→30），放宽长度（150→180）；最优 run 达到约 9/13 成功（如 results/run_medium_local_20260105_140852.txt）。划分模式（10/3）仍 0/3（results/run_medium_local_20260105_143903.txt），说明模型记忆训练任务但对验证任务泛化弱。
+- MBPP 训练/评估：使用更强预热+PPO（30 updates、长序列、强教师）验证集仍 0/90（results/run_medium_mbpp_20260105_150151.txt），字符级小模型对公开题库几乎无泛化。
+- 典型问题与处理：
+  - vocab mismatch：fast 脚本在 MBPP 模式下加载了本地预热权重，shape 不符；需使用对应数据集的预热/ppo 权重，或改用 medium/full 脚本。
+  - HF Hub 警告/SSL 抖动：网络不稳或未设置 `HF_TOKEN`，可忽略或配置 `HF_TOKEN`。
+- 交付建议：用本地任务无划分的结果作为主实验（有 7–9/13 的可展示成功率），附带划分/MBPP 的 0 成绩作为“泛化不足”证据，在报告中说明限制与改进方向（更多任务、token 级建模、更大模型）。***
