@@ -14,7 +14,7 @@ from torch.distributions import Categorical
 
 from env.code_env import CodeGenEnv
 from models.net import CharPolicy
-from tasks.tasks import TASKS
+from tasks.tasks import TASKS, split_tasks
 
 
 @dataclass
@@ -227,13 +227,13 @@ def flatten_sequences(seqs: List[List[int]], pad_id: int) -> tuple[torch.Tensor,
     return torch.tensor(padded, dtype=torch.long), lengths
 
 
-def build_teacher_batch(tokenizer: Tokenizer, max_seq_len: int, pad_id: int):
+def build_teacher_batch(tokenizer: Tokenizer, max_seq_len: int, pad_id: int, tasks: List):
     """
     使用任务的 prompt+canonical_solution 构建一个 teacher forcing 批次，提供监督信号。
     """
     inputs = []
     targets = []
-    for task in TASKS:
+    for task in tasks:
         seq = f"{task.prompt}\n{task.canonical_solution}"
         token_ids = tokenizer.encode(seq, add_eos=True, max_len=max_seq_len)
         inp = token_ids[:-1]
@@ -251,13 +251,18 @@ def build_teacher_batch(tokenizer: Tokenizer, max_seq_len: int, pad_id: int):
 
 
 def train_ppo(args):
-    env = CodeGenEnv(max_steps=args.max_steps)
+    if args.no_split:
+        train_tasks = TASKS
+    else:
+        train_tasks, _ = split_tasks(TASKS, train_ratio=args.train_ratio, seed=args.split_seed)
+
+    env = CodeGenEnv(tasks=train_tasks, max_steps=args.max_steps, vocab_tasks=TASKS)
     tokenizer = Tokenizer(env.vocab, env.eos_token)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 构建受限动作集：仅允许任务 prompt 和参考解中出现过的字符
     char_set = set()
-    for t in TASKS:
+    for t in train_tasks:
         char_set.update(t.prompt)
         char_set.update(t.canonical_solution)
     allowed_ids = {tokenizer.token_to_id[ch] for ch in char_set if ch in tokenizer.token_to_id}
@@ -331,7 +336,7 @@ def train_ppo(args):
 
         # 构建 teacher forcing 批次
         bc_inputs, bc_targets = build_teacher_batch(
-            tokenizer, max_seq_len=args.max_seq_len, pad_id=pad_id
+            tokenizer, max_seq_len=args.max_seq_len, pad_id=pad_id, tasks=train_tasks
         )
 
         ppo_update(
@@ -399,6 +404,9 @@ def parse_args():
     parser.add_argument("--load-pretrain", type=str, default="checkpoints/pretrain.pt")
     parser.add_argument("--save-path", type=str, default="checkpoints/ppo.pt")
     parser.add_argument("--bc-coef", type=float, default=0.5, help="行为克隆损失系数")
+    parser.add_argument("--train-ratio", type=float, default=0.8, help="训练集比例")
+    parser.add_argument("--split-seed", type=int, default=42, help="训练/验证划分随机种子")
+    parser.add_argument("--no-split", action="store_true", help="不做训练/验证划分")
     return parser.parse_args()
 
 

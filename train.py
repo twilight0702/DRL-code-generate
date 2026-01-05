@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from env.code_env import CodeGenEnv
 from models.net import CharPolicy
-from tasks.tasks import TASKS
+from tasks.tasks import TASKS, split_tasks
 
 
 @dataclass
@@ -82,8 +82,8 @@ def make_collate_fn(pad_id: int):
     return collate_batch
 
 
-def random_rollout(episodes: int, max_steps: int) -> Tuple[int, int]:
-    env = CodeGenEnv(max_steps=max_steps)
+def random_rollout(episodes: int, max_steps: int, tasks: List, vocab_tasks: List) -> Tuple[int, int]:
+    env = CodeGenEnv(tasks=tasks, max_steps=max_steps, vocab_tasks=vocab_tasks)
     successes = 0
     for ep in range(episodes):
         _, info = env.reset()
@@ -105,12 +105,12 @@ def random_rollout(episodes: int, max_steps: int) -> Tuple[int, int]:
     return successes, episodes
 
 
-def greedy_template(episodes: int, max_steps: int) -> Tuple[int, int]:
+def greedy_template(episodes: int, max_steps: int, tasks: List, vocab_tasks: List) -> Tuple[int, int]:
     """
     直接输出 canonical_solution，作为上限基线。
     不通过环境 step，而是复用 env 的评估逻辑。
     """
-    env = CodeGenEnv(max_steps=max_steps)
+    env = CodeGenEnv(tasks=tasks, max_steps=max_steps, vocab_tasks=vocab_tasks)
     successes = 0
     for ep in range(episodes):
         _, info = env.reset()
@@ -134,10 +134,12 @@ def pretrain_teacher_forcing(
     embed_dim: int,
     hidden_dim: int,
     save_path: Path | None,
+    tasks: List,
+    vocab_tasks: List,
 ) -> CharPolicy:
-    env = CodeGenEnv()
+    env = CodeGenEnv(tasks=tasks, vocab_tasks=vocab_tasks)
     tokenizer = Tokenizer(vocab=env.vocab, eos_token=env.eos_token)
-    dataset = TaskDataset(TASKS, tokenizer)
+    dataset = TaskDataset(tasks, tokenizer)
     collate_fn = make_collate_fn(dataset.pad_id)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
@@ -216,6 +218,7 @@ def greedy_decode(
 
 def evaluate_checkpoint(
     ckpt_path: Path,
+    tasks: List,
     max_len: int = 256,
     max_steps: int = 200,
 ) -> None:
@@ -238,15 +241,15 @@ def evaluate_checkpoint(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    env = CodeGenEnv(max_steps=max_steps)
+    env = CodeGenEnv(tasks=tasks, max_steps=max_steps, vocab_tasks=TASKS)
     successes = 0
-    for task in TASKS:
+    for task in tasks:
         prefix = f"{task.prompt}\n"
         code = greedy_decode(model, tokenizer, prefix=prefix, max_len=max_len)
         reward, passed = env._evaluate_code(code, task)
         successes += int(passed)
         print(f"[eval] task={task.name} passed={passed} reward={reward} code_len={len(code)}")
-    print(f"Success rate: {successes}/{len(TASKS)} = {successes/len(TASKS):.2f}")
+    print(f"Success rate: {successes}/{len(tasks)} = {successes/len(tasks):.2f}")
 
 
 def parse_args():
@@ -277,16 +280,33 @@ def parse_args():
         help="评估时加载的 checkpoint 路径",
     )
     parser.add_argument("--max-gen-len", type=int, default=256, help="贪心解码最大长度")
+    parser.add_argument("--train-ratio", type=float, default=0.8, help="训练集比例")
+    parser.add_argument("--split-seed", type=int, default=42, help="训练/验证划分随机种子")
+    parser.add_argument("--no-split", action="store_true", help="不做训练/验证划分")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.no_split:
+        train_tasks, val_tasks = TASKS, TASKS
+    else:
+        train_tasks, val_tasks = split_tasks(TASKS, train_ratio=args.train_ratio, seed=args.split_seed)
     if args.mode == "random":
-        success, total = random_rollout(episodes=args.episodes, max_steps=args.max_steps)
+        success, total = random_rollout(
+            episodes=args.episodes,
+            max_steps=args.max_steps,
+            tasks=val_tasks,
+            vocab_tasks=TASKS,
+        )
         print(f"Success rate: {success}/{total} = {success/total:.2f}")
     elif args.mode == "template":
-        success, total = greedy_template(episodes=args.episodes, max_steps=args.max_steps)
+        success, total = greedy_template(
+            episodes=args.episodes,
+            max_steps=args.max_steps,
+            tasks=val_tasks,
+            vocab_tasks=TASKS,
+        )
         print(f"Success rate: {success}/{total} = {success/total:.2f}")
     elif args.mode == "pretrain":
         pretrain_teacher_forcing(
@@ -296,12 +316,15 @@ if __name__ == "__main__":
             embed_dim=args.embed_dim,
             hidden_dim=args.hidden_dim,
             save_path=args.save_path,
+            tasks=train_tasks,
+            vocab_tasks=TASKS,
         )
     else:  # eval
         if args.load_path is None:
             raise ValueError("--load-path is required in eval mode")
         evaluate_checkpoint(
             ckpt_path=args.load_path,
+            tasks=val_tasks,
             max_len=args.max_gen_len,
             max_steps=args.max_steps,
         )

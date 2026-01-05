@@ -11,7 +11,7 @@ import torch
 from env.code_env import CodeGenEnv
 from ppo_train import ActorCritic, Tokenizer
 from models.net import CharPolicy
-from tasks.tasks import TASKS
+from tasks.tasks import TASKS, split_tasks
 
 
 def greedy_decode(model, tokenizer: Tokenizer, prompt: str, max_len: int = 256):
@@ -71,8 +71,8 @@ def load_model_checkpoint(ckpt_path: Path) -> tuple[object, Tokenizer]:
     return model, tokenizer
 
 
-def eval_random(episodes: int, max_steps: int):
-    env = CodeGenEnv(max_steps=max_steps)
+def eval_random(episodes: int, max_steps: int, tasks):
+    env = CodeGenEnv(tasks=tasks, max_steps=max_steps, vocab_tasks=TASKS)
     successes = 0
     for ep in range(episodes):
         obs, info = env.reset()
@@ -84,8 +84,8 @@ def eval_random(episodes: int, max_steps: int):
     print(f"[random] success={successes}/{episodes} = {successes/episodes:.2f}")
 
 
-def eval_template(episodes: int, max_steps: int):
-    env = CodeGenEnv(max_steps=max_steps)
+def eval_template(episodes: int, max_steps: int, tasks):
+    env = CodeGenEnv(tasks=tasks, max_steps=max_steps, vocab_tasks=TASKS)
     successes = 0
     for ep in range(episodes):
         _, info = env.reset()
@@ -97,17 +97,17 @@ def eval_template(episodes: int, max_steps: int):
     print(f"[template] success={successes}/{episodes} = {successes/episodes:.2f}")
 
 
-def eval_model(ckpt_path: Path, max_len: int, max_steps: int):
+def eval_model(ckpt_path: Path, max_len: int, max_steps: int, tasks):
     model, tokenizer = load_model_checkpoint(ckpt_path)
-    env = CodeGenEnv(max_steps=max_steps)
+    env = CodeGenEnv(tasks=tasks, max_steps=max_steps, vocab_tasks=TASKS)
     successes = 0
-    for task in TASKS:
+    for task in tasks:
         prompt = f"{task.prompt}\n"
         code = greedy_decode(model, tokenizer, prompt=prompt, max_len=max_len)
         reward, passed = env._evaluate_code(code, task)
         successes += int(passed)
         print(f"[model] task={task.name} passed={passed} reward={reward} code_len={len(code)}")
-    print(f"[model] success={successes}/{len(TASKS)} = {successes/len(TASKS):.2f}")
+    print(f"[model] success={successes}/{len(tasks)} = {successes/len(tasks):.2f}")
 
 
 def main():
@@ -117,14 +117,22 @@ def main():
     parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument("--max-gen-len", type=int, default=256)
     parser.add_argument("--ckpt", type=Path, default=Path("checkpoints/pretrain.pt"))
+    parser.add_argument("--train-ratio", type=float, default=0.8, help="训练集比例")
+    parser.add_argument("--split-seed", type=int, default=42, help="训练/验证划分随机种子")
+    parser.add_argument("--no-split", action="store_true", help="不做训练/验证划分")
     args = parser.parse_args()
 
-    if args.mode == "random":
-        eval_random(args.episodes, args.max_steps)
-    elif args.mode == "template":
-        eval_template(args.episodes, args.max_steps)
+    if args.no_split:
+        _, eval_tasks = TASKS, TASKS
     else:
-        eval_model(args.ckpt, args.max_gen_len, args.max_steps)
+        _, eval_tasks = split_tasks(TASKS, train_ratio=args.train_ratio, seed=args.split_seed)
+
+    if args.mode == "random":
+        eval_random(args.episodes, args.max_steps, tasks=eval_tasks)
+    elif args.mode == "template":
+        eval_template(args.episodes, args.max_steps, tasks=eval_tasks)
+    else:
+        eval_model(args.ckpt, args.max_gen_len, args.max_steps, tasks=eval_tasks)
 
 
 if __name__ == "__main__":

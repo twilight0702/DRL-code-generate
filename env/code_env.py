@@ -23,7 +23,7 @@ class CodeGenEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, tasks=None, max_steps: int = 200):
+    def __init__(self, tasks=None, max_steps: int = 200, vocab_tasks=None):
         super().__init__()
         self.tasks = tasks or TASKS
         self.max_steps = max_steps
@@ -32,8 +32,10 @@ class CodeGenEnv(gym.Env):
         # 同时包含任务 prompt 中的字符（有中文），保证编码不报错。
         base_chars = string.ascii_letters + string.digits + " _():.,\n+-*/=<>'\"[]{}#"
         extra_chars = set()
-        for t in self.tasks:
+        tasks_for_vocab = vocab_tasks or self.tasks
+        for t in tasks_for_vocab:
             extra_chars.update(t.prompt)
+            extra_chars.update(t.canonical_solution)
         self.vocab = list(dict.fromkeys(base_chars + "".join(sorted(extra_chars))))  # 去重保序
         self.eos_token = "<EOS>"
         self.vocab.append(self.eos_token)

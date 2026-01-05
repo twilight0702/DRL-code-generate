@@ -1,0 +1,97 @@
+# 项目说明
+
+本项目为一个**极简、可在 CPU 上复现**的深度强化学习（DRL）代码生成实验。
+智能体以字符级方式生成 Python 代码，通过 pytest 测试获得奖励，用于本科机器学习课程大作业。
+
+## 已完成的工作
+- 构建了小规模任务集：每个任务包含 prompt、参考解与 pytest 测试。
+- 实现 Gym 风格代码生成环境，基于 pytest 运行结果给奖励。
+- 提供基线（random/template）、监督预热（teacher forcing）与 PPO 训练脚本。
+- 提供统一评估脚本，用于对比不同方法的通过率。
+- 增加训练/验证划分（默认 8:2，seed=42）。
+- 补充小组计划与完整运行流程文档。
+
+## 项目结构
+- `tasks/`：任务定义（prompt、参考解、测试代码）。
+- `env/`：代码生成环境（运行 pytest 并给奖励）。
+- `models/`：字符级 GRU 模型。
+- `train.py`：基线 + 预热训练 + 评估入口。
+- `ppo_train.py`：PPO 训练脚本（含行为克隆可选项）。
+- `benchmark.py`：统一评估脚本（random/template/model）。
+- `tests/`：参考解的 pytest 校验。
+- `report.md`：工作日志与实验记录参考。
+- `PLAN.md`：初始计划。
+- `GROUP_PLAN.md`：小组分工与后续规划。
+- `RUN.md`：完整运行流程（下方也包含）。
+
+## 工作流程概览
+1. 任务提供自然语言 prompt 与 pytest 测试。
+2. 智能体逐字符生成代码，直到 `<EOS>` 或达到最大长度。
+3. 环境运行 pytest 计算奖励（通过比例 + 语法奖励）。
+4. 在验证集上评估成功率与平均奖励。
+
+## 数据与任务
+任务为小规模函数题（数学/字符串/列表处理等），保持简单可行。
+任务列表在 `tasks/tasks.py` 中定义。
+
+## 运行指令
+默认使用训练/验证划分（8:2，seed=42）。  
+若要全量训练与评估，请在命令末尾加 `--no-split`。
+
+### 0) 环境准备
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 1) 任务与测试自检
+```bash
+pytest tests/test_tasks.py
+```
+
+### 2) 基线实验（验证集）
+随机基线：
+```bash
+python train.py --mode random --episodes 5 --max-steps 120
+```
+
+模板基线：
+```bash
+python train.py --mode template --episodes 5 --max-steps 120
+```
+
+### 3) 预热训练 + 评估
+预热训练（训练集）：
+```bash
+python train.py --mode pretrain --epochs 40 --batch-size 4 --embed-dim 128 --hidden-dim 256 --save-path checkpoints/pretrain.pt
+```
+
+预热评估（验证集）：
+```bash
+python train.py --mode eval --load-path checkpoints/pretrain.pt --max-gen-len 200 --max-steps 200
+```
+
+### 4) PPO 训练 + 评估
+PPO 训练（训练集）：
+```bash
+python ppo_train.py --updates 30 --episodes-per-update 12 --teacher-episodes 4 --max-steps 150 --max-seq-len 150 --save-path checkpoints/ppo.pt
+```
+
+PPO 评估（验证集）：
+```bash
+python benchmark.py --mode model --ckpt checkpoints/ppo.pt --max-gen-len 200 --max-steps 200
+```
+
+### 5) 统一评估脚本（可选）
+```bash
+python benchmark.py --mode random --episodes 5
+python benchmark.py --mode template --episodes 5
+python benchmark.py --mode model --ckpt checkpoints/pretrain.pt
+python benchmark.py --mode model --ckpt checkpoints/ppo.pt
+```
+
+## 说明
+- 奖励基于 pytest 通过比例，并带有小额语法奖励。
+- 词表覆盖所有 prompt 与参考解字符，避免 OOV。
+- 训练参数保持轻量，适合 CPU 快速验证。
