@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader, Dataset
 from env.code_env import CodeGenEnv
 from models.net import CharPolicy
 from tasks.tasks import TASKS, split_tasks
+from mbpp_tasks import load_mbpp_tasks
 
 
 @dataclass
@@ -257,6 +258,12 @@ def parse_args():
     parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--max-steps", type=int, default=120)
     parser.add_argument(
+        "--dataset",
+        choices=["local", "mbpp"],
+        default="local",
+        help="训练/评估数据集来源",
+    )
+    parser.add_argument(
         "--mode",
         choices=["random", "template", "pretrain", "eval"],
         default="random",
@@ -283,21 +290,44 @@ def parse_args():
     parser.add_argument("--train-ratio", type=float, default=0.8, help="训练集比例")
     parser.add_argument("--split-seed", type=int, default=42, help="训练/验证划分随机种子")
     parser.add_argument("--no-split", action="store_true", help="不做训练/验证划分")
+    parser.add_argument("--mbpp-train-split", type=str, default="train")
+    parser.add_argument("--mbpp-eval-split", type=str, default="validation")
+    parser.add_argument("--mbpp-max-samples", type=int, default=0)
+    parser.add_argument("--mbpp-seed", type=int, default=42)
+    parser.add_argument("--mbpp-use-challenge-tests", action="store_true")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    if args.no_split:
-        train_tasks, val_tasks = TASKS, TASKS
+    if args.dataset == "mbpp":
+        train_tasks = load_mbpp_tasks(
+            split=args.mbpp_train_split,
+            max_samples=args.mbpp_max_samples,
+            seed=args.mbpp_seed,
+            use_challenge_tests=args.mbpp_use_challenge_tests,
+        )
+        val_tasks = load_mbpp_tasks(
+            split=args.mbpp_eval_split,
+            max_samples=args.mbpp_max_samples,
+            seed=args.mbpp_seed,
+            use_challenge_tests=args.mbpp_use_challenge_tests,
+        )
+        vocab_tasks = train_tasks + val_tasks
     else:
-        train_tasks, val_tasks = split_tasks(TASKS, train_ratio=args.train_ratio, seed=args.split_seed)
+        if args.no_split:
+            train_tasks, val_tasks = TASKS, TASKS
+        else:
+            train_tasks, val_tasks = split_tasks(
+                TASKS, train_ratio=args.train_ratio, seed=args.split_seed
+            )
+        vocab_tasks = TASKS
     if args.mode == "random":
         success, total = random_rollout(
             episodes=args.episodes,
             max_steps=args.max_steps,
             tasks=val_tasks,
-            vocab_tasks=TASKS,
+            vocab_tasks=vocab_tasks,
         )
         print(f"Success rate: {success}/{total} = {success/total:.2f}")
     elif args.mode == "template":
@@ -305,7 +335,7 @@ if __name__ == "__main__":
             episodes=args.episodes,
             max_steps=args.max_steps,
             tasks=val_tasks,
-            vocab_tasks=TASKS,
+            vocab_tasks=vocab_tasks,
         )
         print(f"Success rate: {success}/{total} = {success/total:.2f}")
     elif args.mode == "pretrain":
@@ -317,7 +347,7 @@ if __name__ == "__main__":
             hidden_dim=args.hidden_dim,
             save_path=args.save_path,
             tasks=train_tasks,
-            vocab_tasks=TASKS,
+            vocab_tasks=vocab_tasks,
         )
     else:  # eval
         if args.load_path is None:

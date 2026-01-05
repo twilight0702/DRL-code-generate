@@ -18,6 +18,7 @@
 - `train.py`：基线 + 预热训练 + 评估入口。
 - `ppo_train.py`：PPO 训练脚本（含行为克隆可选项）。
 - `benchmark.py`：统一评估脚本（random/template/model）。
+- `mbpp_eval.py`：在 MBPP 数据集上的额外评估脚本（外部评估集）。
 - `tests/`：参考解的 pytest 校验。
 - `report.md`：工作日志与实验记录参考。
 - `PLAN.md`：初始计划。
@@ -35,8 +36,9 @@
 任务列表在 `tasks/tasks.py` 中定义。
 
 ## 运行指令
-默认使用训练/验证划分（8:2，seed=42）。  
-若要全量训练与评估，请在命令末尾加 `--no-split`。
+默认使用训练/验证划分（8:2，seed=42），数据集为 `local`（自建任务集）。  
+若要全量训练与评估，请在命令末尾加 `--no-split`。  
+若要使用 MBPP 数据集训练/评估，请添加 `--dataset mbpp` 及对应参数。
 
 ### 0) 环境准备
 ```bash
@@ -45,12 +47,30 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### 一键运行全流程脚本
+```bash
+./scripts/run_all.sh --dataset local --no-split
+./scripts/run_all.sh --dataset mbpp --mbpp-max-samples 200
+```
+
+### 一键运行全流程脚本（更快的 PPO 配置）
+```bash
+./scripts/run_all_fast.sh --dataset local --no-split
+./scripts/run_all_fast.sh --dataset mbpp --mbpp-max-samples 200
+```
+
+### 一键运行全流程脚本（中等 PPO 配置）
+```bash
+./scripts/run_all_medium.sh --dataset local --no-split
+./scripts/run_all_medium.sh --dataset mbpp --mbpp-max-samples 200
+```
+
 ### 1) 任务与测试自检
 ```bash
 pytest tests/test_tasks.py
 ```
 
-### 2) 基线实验（验证集）
+### 2) 基线实验（验证集，本地任务集）
 随机基线：
 ```bash
 python train.py --mode random --episodes 5 --max-steps 120
@@ -61,7 +81,7 @@ python train.py --mode random --episodes 5 --max-steps 120
 python train.py --mode template --episodes 5 --max-steps 120
 ```
 
-### 3) 预热训练 + 评估
+### 3) 预热训练 + 评估（本地任务集，划分）
 预热训练（训练集）：
 ```bash
 python train.py --mode pretrain --epochs 40 --batch-size 4 --embed-dim 128 --hidden-dim 256 --save-path checkpoints/pretrain.pt
@@ -72,7 +92,7 @@ python train.py --mode pretrain --epochs 40 --batch-size 4 --embed-dim 128 --hid
 python train.py --mode eval --load-path checkpoints/pretrain.pt --max-gen-len 200 --max-steps 200
 ```
 
-### 4) PPO 训练 + 评估
+### 4) PPO 训练 + 评估（本地任务集，划分）
 PPO 训练（训练集）：
 ```bash
 python ppo_train.py --updates 30 --episodes-per-update 12 --teacher-episodes 4 --max-steps 150 --max-seq-len 150 --save-path checkpoints/ppo.pt
@@ -83,12 +103,47 @@ PPO 评估（验证集）：
 python benchmark.py --mode model --ckpt checkpoints/ppo.pt --max-gen-len 200 --max-steps 200
 ```
 
-### 5) 统一评估脚本（可选）
+### 5) 统一评估脚本（本地任务集，划分）
 ```bash
 python benchmark.py --mode random --episodes 5
 python benchmark.py --mode template --episodes 5
 python benchmark.py --mode model --ckpt checkpoints/pretrain.pt
 python benchmark.py --mode model --ckpt checkpoints/ppo.pt
+```
+
+### 6) 本地任务集（不划分，训练=评估）
+```bash
+python train.py --mode random --episodes 5 --max-steps 120 --no-split
+python train.py --mode template --episodes 5 --max-steps 120 --no-split
+python train.py --mode pretrain --epochs 40 --batch-size 4 --save-path checkpoints/pretrain.pt --no-split
+python train.py --mode eval --load-path checkpoints/pretrain.pt --max-gen-len 200 --max-steps 200 --no-split
+```
+
+### 7) MBPP 外部评估（仅评估）
+```bash
+python mbpp_eval.py --ckpt checkpoints/pretrain.pt --split validation --max-samples 50
+python mbpp_eval.py --ckpt checkpoints/ppo.pt --split validation --max-samples 50
+```
+
+### 8) 使用 MBPP 进行训练与评估
+预热训练（MBPP）：
+```bash
+python train.py --dataset mbpp --mode pretrain --mbpp-train-split train --mbpp-eval-split validation --mbpp-max-samples 200 --save-path checkpoints/pretrain_mbpp.pt
+```
+
+评估（MBPP）：
+```bash
+python train.py --dataset mbpp --mode eval --mbpp-eval-split validation --mbpp-max-samples 200 --load-path checkpoints/pretrain_mbpp.pt
+```
+
+PPO 训练（MBPP）：
+```bash
+python ppo_train.py --dataset mbpp --mbpp-train-split train --mbpp-eval-split validation --mbpp-max-samples 200 --save-path checkpoints/ppo_mbpp.pt
+```
+
+评估（MBPP）：
+```bash
+python mbpp_eval.py --ckpt checkpoints/ppo_mbpp.pt --split validation --max-samples 200
 ```
 
 ## 说明
