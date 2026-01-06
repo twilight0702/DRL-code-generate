@@ -1,0 +1,188 @@
+[info] dataset=local no_split=true mbpp_max_samples=200
+[info] started_at=2026-01-05T16:44:53Z
+
+[step] random baseline
+[random ep 0] task=count_words passed=False reward=0.0 steps=61
+[random ep 1] task=is_even passed=False reward=0.0 steps=120
+[random ep 2] task=factorial passed=False reward=0.0 steps=120
+[random ep 3] task=factorial passed=False reward=0.0 steps=107
+[random ep 4] task=is_palindrome passed=False reward=0.0 steps=65
+Success rate: 0/5 = 0.00
+
+[step] template baseline
+[template ep 0] task=count_vowels passed=True reward=1.0 steps~114
+[template ep 1] task=unique_count passed=True reward=1.0 steps~53
+[template ep 2] task=second_largest passed=True reward=1.0 steps~98
+[template ep 3] task=is_even passed=True reward=1.0 steps~52
+[template ep 4] task=fizzbuzz_str passed=True reward=1.0 steps~180
+Success rate: 5/5 = 1.00
+
+[step] pretrain
+Pretrain on 13 samples, device=cuda
+[pretrain] epoch=1 loss/token=4.7196
+[pretrain] epoch=2 loss/token=3.6597
+[pretrain] epoch=3 loss/token=3.0901
+[pretrain] epoch=4 loss/token=2.8288
+[pretrain] epoch=5 loss/token=2.5586
+[pretrain] epoch=6 loss/token=2.3694
+[pretrain] epoch=7 loss/token=2.2135
+[pretrain] epoch=8 loss/token=2.0078
+[pretrain] epoch=9 loss/token=1.8517
+[pretrain] epoch=10 loss/token=1.7348
+[pretrain] epoch=11 loss/token=1.6035
+[pretrain] epoch=12 loss/token=1.5026
+[pretrain] epoch=13 loss/token=1.3766
+[pretrain] epoch=14 loss/token=1.2733
+[pretrain] epoch=15 loss/token=1.1792
+[pretrain] epoch=16 loss/token=1.0921
+[pretrain] epoch=17 loss/token=0.9697
+[pretrain] epoch=18 loss/token=0.9182
+[pretrain] epoch=19 loss/token=0.8247
+[pretrain] epoch=20 loss/token=0.7549
+[pretrain] epoch=21 loss/token=0.7045
+[pretrain] epoch=22 loss/token=0.6395
+[pretrain] epoch=23 loss/token=0.6022
+[pretrain] epoch=24 loss/token=0.5517
+[pretrain] epoch=25 loss/token=0.4954
+[pretrain] epoch=26 loss/token=0.4834
+[pretrain] epoch=27 loss/token=0.4379
+[pretrain] epoch=28 loss/token=0.4112
+[pretrain] epoch=29 loss/token=0.3962
+[pretrain] epoch=30 loss/token=0.3753
+[pretrain] epoch=31 loss/token=0.3496
+[pretrain] epoch=32 loss/token=0.3263
+[pretrain] epoch=33 loss/token=0.3120
+[pretrain] epoch=34 loss/token=0.2993
+[pretrain] epoch=35 loss/token=0.2830
+[pretrain] epoch=36 loss/token=0.2716
+[pretrain] epoch=37 loss/token=0.2505
+[pretrain] epoch=38 loss/token=0.2406
+[pretrain] epoch=39 loss/token=0.2454
+[pretrain] epoch=40 loss/token=0.2303
+[pretrain] epoch=41 loss/token=0.2203
+[pretrain] epoch=42 loss/token=0.2169
+[pretrain] epoch=43 loss/token=0.2084
+[pretrain] epoch=44 loss/token=0.2003
+[pretrain] epoch=45 loss/token=0.1921
+[pretrain] epoch=46 loss/token=0.1841
+[pretrain] epoch=47 loss/token=0.1814
+[pretrain] epoch=48 loss/token=0.1856
+[pretrain] epoch=49 loss/token=0.1738
+[pretrain] epoch=50 loss/token=0.1713
+[pretrain] epoch=51 loss/token=0.1609
+[pretrain] epoch=52 loss/token=0.1621
+[pretrain] epoch=53 loss/token=0.1573
+[pretrain] epoch=54 loss/token=0.1468
+[pretrain] epoch=55 loss/token=0.1440
+[pretrain] epoch=56 loss/token=0.1462
+[pretrain] epoch=57 loss/token=0.1357
+[pretrain] epoch=58 loss/token=0.1305
+[pretrain] epoch=59 loss/token=0.1246
+[pretrain] epoch=60 loss/token=0.1269
+[pretrain] epoch=61 loss/token=0.1229
+[pretrain] epoch=62 loss/token=0.1184
+[pretrain] epoch=63 loss/token=0.1154
+[pretrain] epoch=64 loss/token=0.1097
+[pretrain] epoch=65 loss/token=0.1089
+[pretrain] epoch=66 loss/token=0.1085
+[pretrain] epoch=67 loss/token=0.1085
+[pretrain] epoch=68 loss/token=0.1100
+[pretrain] epoch=69 loss/token=0.1073
+[pretrain] epoch=70 loss/token=0.1185
+[pretrain] epoch=71 loss/token=0.1190
+[pretrain] epoch=72 loss/token=0.1062
+[pretrain] epoch=73 loss/token=0.1067
+[pretrain] epoch=74 loss/token=0.0960
+[pretrain] epoch=75 loss/token=0.0937
+[pretrain] epoch=76 loss/token=0.0879
+[pretrain] epoch=77 loss/token=0.0839
+[pretrain] epoch=78 loss/token=0.0791
+[pretrain] epoch=79 loss/token=0.0764
+[pretrain] epoch=80 loss/token=0.0742
+Saved checkpoint to checkpoints/pretrain_medium.pt
+
+[step] eval pretrain
+[eval] task=abs_value passed=False reward=0.1 code_len=54
+[eval] task=reverse_string passed=True reward=1.0 code_len=54
+[eval] task=factorial passed=False reward=0.1 code_len=120
+[eval] task=is_palindrome passed=False reward=0.1 code_len=120
+[eval] task=count_vowels passed=False reward=0.1 code_len=58
+[eval] task=max_of_three passed=False reward=0.1 code_len=54
+[eval] task=clamp passed=False reward=0.6 code_len=120
+[eval] task=sum_list passed=True reward=1.0 code_len=41
+[eval] task=unique_count passed=False reward=0.1 code_len=46
+[eval] task=is_even passed=False reward=0.1 code_len=120
+[eval] task=second_largest passed=True reward=1.0 code_len=97
+[eval] task=count_words passed=True reward=1.0 code_len=58
+[eval] task=fizzbuzz_str passed=False reward=0.0 code_len=120
+Success rate: 4/13 = 0.31
+
+[step] ppo train (medium)
+[init] loaded pretrain weights from checkpoints/pretrain_medium.pt
+[update 1] avg_reward=0.372 last_info=unique_count passed=False
+[update 2] avg_reward=0.839 last_info=unique_count passed=True
+[update 3] avg_reward=0.894 last_info=count_vowels passed=True
+[update 4] avg_reward=0.950 last_info=factorial passed=True
+[update 5] avg_reward=0.950 last_info=is_palindrome passed=True
+[update 6] avg_reward=1.000 last_info=reverse_string passed=True
+[update 7] avg_reward=0.789 last_info=abs_value passed=True
+[update 8] avg_reward=1.000 last_info=abs_value passed=True
+[update 9] avg_reward=0.950 last_info=is_palindrome passed=True
+[update 10] avg_reward=1.000 last_info=is_palindrome passed=True
+[update 11] avg_reward=1.000 last_info=clamp passed=True
+[update 12] avg_reward=0.950 last_info=unique_count passed=True
+[update 13] avg_reward=1.000 last_info=unique_count passed=True
+[update 14] avg_reward=0.950 last_info=factorial passed=True
+[update 15] avg_reward=0.950 last_info=count_vowels passed=True
+[update 16] avg_reward=0.950 last_info=factorial passed=True
+[update 17] avg_reward=0.950 last_info=is_palindrome passed=True
+[update 18] avg_reward=0.900 last_info=sum_list passed=True
+[update 19] avg_reward=0.900 last_info=clamp passed=True
+[update 20] avg_reward=1.000 last_info=reverse_string passed=True
+[update 21] avg_reward=0.950 last_info=clamp passed=True
+[update 22] avg_reward=0.900 last_info=reverse_string passed=True
+[update 23] avg_reward=0.850 last_info=count_vowels passed=True
+[update 24] avg_reward=0.900 last_info=fizzbuzz_str passed=False
+[update 25] avg_reward=0.833 last_info=sum_list passed=True
+[update 26] avg_reward=0.844 last_info=max_of_three passed=True
+[update 27] avg_reward=0.900 last_info=reverse_string passed=True
+[update 28] avg_reward=0.894 last_info=is_palindrome passed=True
+[update 29] avg_reward=0.850 last_info=factorial passed=True
+[update 30] avg_reward=0.950 last_info=max_of_three passed=True
+[update 31] avg_reward=0.950 last_info=abs_value passed=True
+[update 32] avg_reward=0.900 last_info=abs_value passed=True
+[update 33] avg_reward=1.000 last_info=sum_list passed=True
+[update 34] avg_reward=0.894 last_info=max_of_three passed=True
+[update 35] avg_reward=0.800 last_info=fizzbuzz_str passed=False
+[update 36] avg_reward=0.850 last_info=count_words passed=True
+[update 37] avg_reward=0.850 last_info=is_palindrome passed=True
+[update 38] avg_reward=0.950 last_info=fizzbuzz_str passed=False
+[update 39] avg_reward=0.850 last_info=fizzbuzz_str passed=False
+[update 40] avg_reward=0.950 last_info=is_palindrome passed=True
+[update 41] avg_reward=0.900 last_info=count_vowels passed=True
+[update 42] avg_reward=0.900 last_info=second_largest passed=True
+[update 43] avg_reward=0.950 last_info=sum_list passed=True
+[update 44] avg_reward=1.000 last_info=clamp passed=True
+[update 45] avg_reward=0.800 last_info=clamp passed=True
+[update 46] avg_reward=0.950 last_info=is_palindrome passed=True
+[update 47] avg_reward=0.850 last_info=is_even passed=True
+[update 48] avg_reward=0.950 last_info=count_vowels passed=True
+[update 49] avg_reward=0.950 last_info=max_of_three passed=True
+[update 50] avg_reward=0.950 last_info=max_of_three passed=True
+Saved PPO checkpoint to checkpoints/ppo_medium.pt
+
+[step] eval ppo
+[model] task=abs_value passed=True reward=1.0 code_len=50
+[model] task=reverse_string passed=True reward=1.0 code_len=55
+[model] task=factorial passed=True reward=1.0 code_len=179
+[model] task=is_palindrome passed=True reward=1.0 code_len=138
+[model] task=count_vowels passed=True reward=1.0 code_len=114
+[model] task=max_of_three passed=True reward=1.0 code_len=52
+[model] task=clamp passed=True reward=1.0 code_len=102
+[model] task=sum_list passed=True reward=1.0 code_len=42
+[model] task=unique_count passed=True reward=1.0 code_len=53
+[model] task=is_even passed=True reward=1.0 code_len=52
+[model] task=second_largest passed=True reward=1.0 code_len=98
+[model] task=count_words passed=True reward=1.0 code_len=59
+[model] task=fizzbuzz_str passed=False reward=0.1 code_len=171
+[model] success=12/13 = 0.92

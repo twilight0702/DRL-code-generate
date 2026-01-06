@@ -53,7 +53,7 @@ Success rate: 3/3 = 1.00
   - 保存 checkpoint（含 vocab、eos_token、embed_dim、hidden_dim）。
   - 贪心解码支持任务前缀 prompt。
 - 运行示例：
-  - 预热：`python train.py --mode pretrain --epochs 60 --hidden-dim 512 --save-path checkpoints/pretrain.pt`
+ - 预热：`python train.py --mode pretrain --epochs 60 --hidden-dim 512 --save-path checkpoints/pretrain.pt`
   - 评估预热：`python train.py --mode eval --load-path checkpoints/pretrain.pt --max-gen-len 200`
 - 结果：预热后贪心成功率 2/5（abs/reverse），其余未过。
 
@@ -434,12 +434,7 @@ Saved PPO checkpoint to checkpoints/ppo.pt
 - 预热调参：hidden_dim 提升到 512，epochs 提升到 80，长度上限收紧到 120/150；无划分时预热成功率提升到约 4–5/13（见 results/run_medium_local_*），但在最新强配置下预热评估仍可能 0/13（依赖生成长度）。
 - PPO 调参（本地无划分）：逐步提高教师信号（teacher-episodes 4→6→8→10），`bc-coef 1.0→2.0→3.0`，更新步数 20→30→50，长度 150→180→200/220，学习率 1e-4→5e-4→7e-4；最佳 run 达到约 12/13 成功（results/run_medium_local_20260106_004453.txt，仅 fizzbuzz_str 未过），此前有 9/13 与 11/13 的中间版本。
 - 划分模式（10/3）：最佳仍 0/3（results/run_medium_local_20260105_143903.txt），说明模型记忆训练任务但对验证任务泛化弱。
-- MBPP 训练/评估：使用更强预热+PPO（30 updates、长序列、强教师）验证集仍 0/90（results/run_medium_mbpp_20260105_150151.txt），字符级小模型对公开题库几乎无泛化。
-- 典型问题与处理：
-  - vocab mismatch：fast 脚本在 MBPP 模式下加载了本地预热权重，shape 不符；需使用对应数据集的预热/ppo 权重，或改用 medium/full 脚本。
-  - HF Hub 警告/SSL 抖动：网络不稳或未设置 `HF_TOKEN`，可忽略或配置 `HF_TOKEN`。
-- 交付建议：用本地任务无划分的高成功率（如 11–12/13）作为主实验，附带划分/MBPP 的 0 成绩作为“泛化不足”证据，在报告中说明限制与改进方向（更多任务、token 级建模、更大模型）。
+- MBPP 训练/评估：使用更强预热+PPO（30 updates、长序列、强教师）验证集仍 0/90（results），字符级小模型对公开题库几乎无泛化。
 
 ### 7. 后续额外调参记录
-- 更强一版本地无划分：预热 embed=256/hidden=512，PPO updates=50、teacher-episodes=10、max-steps/seq-len/gen-len=220、lr=7e-4，达到 12/13（fizzbuzz_str 未过），见 results/run_medium_local_20260106_004453.txt。
-- 若再尝试：可继续放宽长度至 240，或加 teacher-episodes=12、bc-coef=4.0，但耗时增加，收益不确定。
+- 更强一版本地无划分：预热 embed=256/hidden=512，PPO updates=50、teacher-episodes=10、max-steps/seq-len/gen-len=220、lr=7e-4，达到 12/13（fizzbuzz_str 未过）
