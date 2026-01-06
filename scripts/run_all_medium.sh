@@ -71,23 +71,23 @@ echo -e "\n[step] template baseline" | tee -a "${LOG_FILE}"
 $PYTHON train.py --mode template --episodes 5 --max-steps 120 $COMMON_ARGS | tee -a "${LOG_FILE}"
 
 echo -e "\n[step] pretrain" | tee -a "${LOG_FILE}"
-$PYTHON train.py --mode pretrain --epochs 80 --batch-size 4 --embed-dim 128 --hidden-dim 512 --save-path checkpoints/pretrain_medium.pt $COMMON_ARGS | tee -a "${LOG_FILE}"
+$PYTHON train.py --mode pretrain --epochs 80 --batch-size 4 --embed-dim 256 --hidden-dim 512 --save-path checkpoints/pretrain_medium.pt $COMMON_ARGS | tee -a "${LOG_FILE}"
 
 echo -e "\n[step] eval pretrain" | tee -a "${LOG_FILE}"
 $PYTHON train.py --mode eval --load-path checkpoints/pretrain_medium.pt --max-gen-len 120 --max-steps 200 $COMMON_ARGS | tee -a "${LOG_FILE}"
 
 echo -e "\n[step] ppo train (medium)" | tee -a "${LOG_FILE}"
 if [[ "$DATASET" == "mbpp" ]]; then
-  $PYTHON ppo_train.py --dataset mbpp --mbpp-train-split train --mbpp-eval-split validation --mbpp-max-samples "${MBPP_MAX_SAMPLES}" --updates 30 --episodes-per-update 8 --teacher-episodes 8 --max-steps 180 --max-seq-len 180 --bc-coef 3.0 --load-pretrain checkpoints/pretrain_medium.pt --save-path checkpoints/ppo_medium.pt | tee -a "${LOG_FILE}"
+  $PYTHON ppo_train.py --dataset mbpp --mbpp-train-split train --mbpp-eval-split validation --mbpp-max-samples "${MBPP_MAX_SAMPLES}" --updates 50 --episodes-per-update 8 --teacher-episodes 10 --max-steps 220 --max-seq-len 220 --bc-coef 3.0 --lr 7e-4 --load-pretrain checkpoints/pretrain_medium.pt --save-path checkpoints/ppo_medium.pt | tee -a "${LOG_FILE}"
 else
-  $PYTHON ppo_train.py --updates 30 --episodes-per-update 8 --teacher-episodes 8 --max-steps 180 --max-seq-len 180 --bc-coef 3.0 --load-pretrain checkpoints/pretrain_medium.pt --save-path checkpoints/ppo_medium.pt $COMMON_ARGS | tee -a "${LOG_FILE}"
+  $PYTHON ppo_train.py --updates 50 --episodes-per-update 8 --teacher-episodes 10 --max-steps 220 --max-seq-len 220 --bc-coef 3.0 --lr 7e-4 --load-pretrain checkpoints/pretrain_medium.pt --save-path checkpoints/ppo_medium.pt $COMMON_ARGS | tee -a "${LOG_FILE}"
 fi
 
 echo -e "\n[step] eval ppo" | tee -a "${LOG_FILE}"
 if [[ "$DATASET" == "mbpp" ]]; then
   $PYTHON mbpp_eval.py --ckpt checkpoints/ppo_medium.pt --split validation --max-samples "${MBPP_MAX_SAMPLES}" | tee -a "${LOG_FILE}"
 else
-  $PYTHON benchmark.py --mode model --ckpt checkpoints/ppo_medium.pt --max-gen-len 180 --max-steps 180 $COMMON_ARGS | tee -a "${LOG_FILE}"
+  $PYTHON benchmark.py --mode model --ckpt checkpoints/ppo_medium.pt --max-gen-len 220 --max-steps 220 $COMMON_ARGS | tee -a "${LOG_FILE}"
 fi
 
 echo -e "\n[done] logs saved to ${LOG_FILE}"
