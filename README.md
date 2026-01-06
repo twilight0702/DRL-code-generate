@@ -53,6 +53,11 @@ pip install -r requirements.txt
 ```
 
 ### 一键运行全流程脚本
+
+注意！这里只建议使用 `medium+不划分` 运行，也就是 `./scripts/run_all_medium.sh --dataset local --no-split`
+
+如果需要验证环境是否可行可以先运行 `./scripts/run_all_fast.sh --dataset local --no-split` 看能否正常结束
+
 ```bash
 ./scripts/run_all.sh --dataset local --no-split
 ./scripts/run_all.sh --dataset mbpp --mbpp-max-samples 200
